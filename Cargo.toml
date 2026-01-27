@@ -13,6 +13,7 @@ image = { version = "0.25.9", default-features = false, features = ["gif"] }
 pixel_formats = "0.1.5"
 rav1e = { version = "0.8.1", features = ["wasm", "serialize"] }
 wasm-bindgen = "0.2.108"
+wasm-bindgen-rayon = { version = "1.3.0", features = ["nightly", "no-bundler"] }
 zerocopy = "0.8.33"
 
 [profile.release]

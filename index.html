@@ -112,7 +112,11 @@
     </div>
 
     <script type="module">
-        import init, { gif_to_avif } from "./pkg/giftoavif.js";
+        
+        const status = document.getElementById('status');
+        const output = document.getElementById('output');
+        const upload = document.getElementById('upload');
+        let worker;
 
         function syncInputs(sliderId, numId) {
             const slider = document.getElementById(sliderId);
@@ -127,72 +131,65 @@
         syncInputs('speedSlider', 'speedNum');
         syncInputs('playbackSlider', 'playbackNum');
 
-        async function run() {
-            const status = document.getElementById('status');
-            const output = document.getElementById('output');
-            const upload = document.getElementById('upload');
+        function initWorker() {
+            worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
 
-            try {
-                await init();
-                status.innerText = "Ready. Configure settings above and upload a GIF.";
-                status.style.color = "green";
-            } catch (e) {
-                status.innerText = "Error loading WASM: " + e;
-                status.className = "error";
-                return;
-            }
-
-            upload.addEventListener('change', async (event) => {
-                const file = event.target.files[0];
-                if (!file) return;
-
-                const fps = parseInt(document.getElementById('fpsNum').value, 10);
-                const crf = parseInt(document.getElementById('crfNum').value, 10);
-                const encSpeed = parseInt(document.getElementById('speedNum').value, 10);
-                const playbackSpeed = parseFloat(document.getElementById('playbackNum').value);
-                const interpolate = document.getElementById('interpolateCheck').checked;
-
-                status.innerText = `Converting... (FPS: ${fps}, Playback: ${playbackSpeed}x, Interpolation: ${interpolate ? 'ON' : 'OFF'})`;
-                output.innerHTML = "";
-
-                const reader = new FileReader();
-                reader.onload = async (e) => {
-                    const bytes = new Uint8Array(e.target.result);
+            worker.onmessage = (e) => {
+                const msg = e.data;
+                if (msg.status === 'ready') {
+                    status.innerText = "Ready. Configure settings and upload GIF.";
+                    status.style.color = "green";
+                    upload.disabled = false;
+                } else if (msg.status === 'success') {
+                    const blob = new Blob([msg.data], { type: 'image/avif' });
+                    const url = URL.createObjectURL(blob);
                     
-                    try {
-                        const startTime = performance.now();
-                        
-                        const avifBytes = gif_to_avif(bytes, fps, crf, encSpeed, playbackSpeed, interpolate); 
-                        
-                        const endTime = performance.now();
-                        const duration = ((endTime - startTime) / 1000).toFixed(2);
+                    output.innerHTML = '';
+                    
+                    const img = document.createElement('img');
+                    img.src = url;
+                    
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = "converted.avif";
+                    link.innerText = "Download converted.avif";
+                    link.className = "download-btn";
 
-                        const blob = new Blob([avifBytes], { type: 'image/avif' });
-                        const url = URL.createObjectURL(blob);
-                        
-                        const img = document.createElement('img');
-                        img.src = url;
-                        
-                        const link = document.createElement('a');
-                        link.href = url;
-                        link.download = "converted.avif";
-                        link.innerText = `Download converted.avif (${duration}s)`;
-                        link.className = "download-btn";
-
-                        output.appendChild(img);
-                        output.appendChild(link);
-                        status.innerText = `Success! Processed in ${duration} seconds.`;
-                    } catch (err) {
-                        status.innerText = "Conversion failed: " + err;
-                        status.className = "error";
-                        console.error(err);
-                    }
-                };
-                reader.readAsArrayBuffer(file);
-            });
+                    output.appendChild(img);
+                    output.appendChild(link);
+                    status.innerText = "Success!";
+                } else if (msg.status === 'error') {
+                    status.innerText = "Error: " + msg.error;
+                    status.className = "error";
+                }
+            };
         }
 
-        run();
+        initWorker();
+
+        upload.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const fps = parseInt(document.getElementById('fpsNum').value, 10);
+            const crf = parseInt(document.getElementById('crfNum').value, 10);
+            const encSpeed = parseInt(document.getElementById('speedNum').value, 10);
+            const playbackSpeed = parseFloat(document.getElementById('playbackNum').value);
+            const interpolate = document.getElementById('interpolateCheck').checked;
+
+            status.innerText = `Converting... (Encoding might still take time, check console)`;
+            output.innerHTML = "";
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const bytes = new Uint8Array(e.target.result);
+                worker.postMessage({
+                    fileData: bytes,
+                    fps, crf, encSpeed, playbackSpeed, interpolate
+                }, [bytes.buffer]);
+            };
+            reader.readAsArrayBuffer(file);
+        });
     </script>
 </body>
 </html>

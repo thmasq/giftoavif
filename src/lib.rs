@@ -3,6 +3,8 @@ use image::codecs::gif::GifDecoder;
 use std::io::Cursor;
 use wasm_bindgen::prelude::*;
 
+pub use wasm_bindgen_rayon::init_thread_pool;
+
 mod encoder;
 mod frame_utils;
 mod isobmff;

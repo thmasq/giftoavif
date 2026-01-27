@@ -21,6 +21,8 @@ impl EncoderManager {
         };
         enc.enable_timing_info = true;
 
+        enc.tiles = 4;
+
         if is_alpha {
             enc.chroma_sampling = ChromaSampling::Cs400;
             enc.pixel_range = PixelRange::Full;
