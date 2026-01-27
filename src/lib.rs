@@ -9,6 +9,7 @@ mod encoder;
 mod frame_utils;
 mod isobmff;
 mod resampler;
+mod scene_change;
 
 #[wasm_bindgen]
 extern "C" {

@@ -130,7 +130,7 @@ dependencies = [
  "num-traits",
  "rayon",
  "thiserror 1.0.69",
- "v_frame",
+ "v_frame 0.3.9",
 ]
 
 [[package]]
@@ -149,7 +149,7 @@ dependencies = [
  "pastey",
  "rayon",
  "thiserror 2.0.18",
- "v_frame",
+ "v_frame 0.3.9",
  "y4m",
 ]
 
@@ -165,7 +165,7 @@ dependencies = [
  "nom",
  "num-rational",
  "serde",
- "v_frame",
+ "v_frame 0.3.9",
 ]
 
 [[package]]
@@ -511,8 +511,11 @@ dependencies = [
  "bitstream-io",
  "byteorder",
  "image",
+ "log",
  "pixel_formats",
  "rav1e",
+ "rayon",
+ "v_frame 0.5.0",
  "wasm-bindgen",
  "wasm-bindgen-rayon",
  "zerocopy",
@@ -1095,7 +1098,7 @@ dependencies = [
  "simd_helpers",
  "thiserror 2.0.18",
  "toml",
- "v_frame",
+ "v_frame 0.3.9",
  "wasm-bindgen",
  "y4m",
 ]
@@ -1414,6 +1417,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "v_frame"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "327127c37e0b0d9d93dc053beb60ce876174aaa469d282d46d3212c634958add"
+dependencies = [
+ "aligned-vec",
+ "num-traits",
+ "thiserror 2.0.18",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1726,18 +1741,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.33"
+version = "0.8.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "668f5168d10b9ee831de31933dc111a459c97ec93225beb307aed970d1372dfd"
+checksum = "71ddd76bcebeed25db614f82bf31a9f4222d3fbba300e6fb6c00afa26cbd4d9d"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.33"
+version = "0.8.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c7962b26b0a8685668b671ee4b54d007a67d4eaf05fda79ac0ecf41e32270f1"
+checksum = "d8187381b52e32220d50b255276aa16a084ec0a9017a0ca2152a1f55c539758d"
 dependencies = [
  "proc-macro2",
  "quote",
