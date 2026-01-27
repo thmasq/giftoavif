@@ -11,6 +11,9 @@ use v_frame::frame::Frame;
 use v_frame::frame::FrameBuilder;
 use v_frame::plane::Plane;
 
+#[cfg(target_arch = "wasm32")]
+use core::arch::wasm32::*;
+
 const IMP_BLOCK_SIZE: usize = 8;
 const REF_FRAMES: usize = 8;
 
@@ -645,6 +648,7 @@ fn downscale_in_place(src: &Plane<u8>, dst: &mut Plane<u8>, scale: usize) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn calculate_sad_plane(p1: &Plane<u8>, p2: &Plane<u8>) -> u64 {
     let width = cmp::min(p1.width().get(), p2.width().get());
     let height = cmp::min(p1.height().get(), p2.height().get());
@@ -658,6 +662,58 @@ fn calculate_sad_plane(p1: &Plane<u8>, p2: &Plane<u8>) -> u64 {
         }
     }
     sum
+}
+
+#[cfg(target_arch = "wasm32")]
+fn calculate_sad_plane(p1: &Plane<u8>, p2: &Plane<u8>) -> u64 {
+    let w = p1.width().get();
+    let h = p1.height().get();
+
+    let n_rows = h.min(p2.height().get());
+    let n_cols = w.min(p2.width().get());
+
+    let stride1 = p1.geometry().stride.get();
+    let stride2 = p2.geometry().stride.get();
+
+    let ptr1 = p1.data().as_ptr();
+    let ptr2 = p2.data().as_ptr();
+
+    let mut sum_u64 = 0u64;
+
+    for y in 0..n_rows {
+        let row1 = unsafe { ptr1.add(y * stride1) };
+        let row2 = unsafe { ptr2.add(y * stride2) };
+        let mut x = 0;
+
+        let mut row_sum = u32x4_splat(0);
+        while x + 16 <= n_cols {
+            let a = unsafe { v128_load(row1.add(x) as *const v128) };
+            let b = unsafe { v128_load(row2.add(x) as *const v128) };
+
+            let diff = v128_or(u8x16_sub_sat(a, b), u8x16_sub_sat(b, a));
+
+            let diff_lo = u16x8_extend_low_u8x16(diff);
+            let diff_hi = u16x8_extend_high_u8x16(diff);
+            let sum_lo = i32x4_extadd_pairwise_i16x8(diff_lo as v128);
+            let sum_hi = i32x4_extadd_pairwise_i16x8(diff_hi as v128);
+
+            row_sum = i32x4_add(row_sum, i32x4_add(sum_lo, sum_hi));
+            x += 16;
+        }
+
+        sum_u64 += (i32x4_extract_lane::<0>(row_sum)
+            + i32x4_extract_lane::<1>(row_sum)
+            + i32x4_extract_lane::<2>(row_sum)
+            + i32x4_extract_lane::<3>(row_sum)) as u64;
+
+        while x < n_cols {
+            let a = unsafe { *row1.add(x) } as i32;
+            let b = unsafe { *row2.add(x) } as i32;
+            sum_u64 += (a - b).abs() as u64;
+            x += 1;
+        }
+    }
+    sum_u64
 }
 
 const HEXAGON_PATTERN: [MotionVector; 6] = [
@@ -768,6 +824,7 @@ fn subpel_refine(
     (best_mv, best_satd)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[inline(always)]
 fn get_satd_8x8(p1: &Plane<u8>, p2: &Plane<u8>, x: usize, y: usize) -> u32 {
     let mut diff = [0i16; 64];
@@ -781,6 +838,43 @@ fn get_satd_8x8(p1: &Plane<u8>, p2: &Plane<u8>, x: usize, y: usize) -> u32 {
     hadamard_8x8(&mut diff)
 }
 
+#[cfg(target_arch = "wasm32")]
+#[inline(always)]
+fn get_satd_8x8(p1: &Plane<u8>, p2: &Plane<u8>, x: usize, y: usize) -> u32 {
+    let stride1 = p1.geometry().stride.get();
+    let stride2 = p2.geometry().stride.get();
+
+    let ptr1 = unsafe { p1.data().as_ptr().add(y * stride1 + x) };
+    let ptr2 = unsafe { p2.data().as_ptr().add(y * stride2 + x) };
+
+    let mut v = [i32x4_splat(0); 8];
+    for i in 0..8 {
+        let r1 = unsafe { v128_load64_zero(ptr1.add(i * stride1) as *const u64) };
+        let r2 = unsafe { v128_load64_zero(ptr2.add(i * stride2) as *const u64) };
+
+        let r1_16 = u16x8_extend_low_u8x16(r1);
+        let r2_16 = u16x8_extend_low_u8x16(r2);
+        v[i] = i16x8_sub(r1_16 as v128, r2_16 as v128);
+    }
+
+    unsafe { hadamard_butterfly(&mut v) };
+    unsafe { transpose_8x8_i16(&mut v) };
+    unsafe { hadamard_butterfly(&mut v) };
+
+    let mut sum = u32x4_splat(0);
+    for i in 0..8 {
+        let abs = i16x8_abs(v[i]);
+        sum = i32x4_add(sum, i32x4_extadd_pairwise_i16x8(abs));
+    }
+
+    (i32x4_extract_lane::<0>(sum)
+        + i32x4_extract_lane::<1>(sum)
+        + i32x4_extract_lane::<2>(sum)
+        + i32x4_extract_lane::<3>(sum)) as u32
+        / 2
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn get_satd_inter(p1: &Plane<u8>, p2: &Plane<u8>, x: usize, y: usize, mv: MotionVector) -> u32 {
     let mx = x as isize * 8 + mv.col as isize;
     let my = y as isize * 8 + mv.row as isize;
@@ -824,6 +918,120 @@ fn get_satd_inter(p1: &Plane<u8>, p2: &Plane<u8>, x: usize, y: usize, mv: Motion
     hadamard_8x8(&mut diff)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn get_satd_inter(p1: &Plane<u8>, p2: &Plane<u8>, x: usize, y: usize, mv: MotionVector) -> u32 {
+    let mx = x as isize * 8 + mv.col as isize;
+    let my = y as isize * 8 + mv.row as isize;
+
+    let x_int = (mx >> 3) as usize;
+    let y_int = (my >> 3) as usize;
+
+    let x_frac = (mx & 7) as u16;
+    let y_frac = (my & 7) as u16;
+
+    let stride1 = p1.geometry().stride.get();
+    let stride2 = p2.geometry().stride.get();
+
+    let ptr1 = unsafe { p1.data().as_ptr().add(y * stride1 + x) };
+    let ptr2 = unsafe { p2.data().as_ptr().add(y_int * stride2 + x_int) };
+
+    let w_xf = i16x8_splat(x_frac as i16);
+    let w_yf = i16x8_splat(y_frac as i16);
+
+    let w_8_xf = i16x8_splat((8 - x_frac) as i16);
+    let w_8_yf = i16x8_splat((8 - y_frac) as i16);
+
+    let mut v = [i32x4_splat(0); 8];
+
+    for i in 0..8 {
+        let r2_a_ptr = unsafe { ptr2.add(i * stride2) };
+
+        let row_a_full = unsafe { v128_load(r2_a_ptr as *const v128) };
+        let row_a_0 = u16x8_extend_low_u8x16(row_a_full);
+        let row_a_1 = u16x8_extend_low_u8x16(u8x16_shuffle::<
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            0,
+        >(row_a_full, row_a_full));
+
+        let r2_b_ptr = unsafe { ptr2.add((i + 1) * stride2) };
+        let row_b_full = unsafe { v128_load(r2_b_ptr as *const v128) };
+        let row_b_0 = u16x8_extend_low_u8x16(row_b_full);
+        let row_b_1 = u16x8_extend_low_u8x16(u8x16_shuffle::<
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            0,
+        >(row_b_full, row_b_full));
+
+        let val_top = i16x8_shr(
+            i16x8_add(
+                i16x8_mul(row_a_0 as v128, w_8_xf),
+                i16x8_mul(row_a_1 as v128, w_xf),
+            ),
+            3,
+        );
+        let val_bot = i16x8_shr(
+            i16x8_add(
+                i16x8_mul(row_b_0 as v128, w_8_xf),
+                i16x8_mul(row_b_1 as v128, w_xf),
+            ),
+            3,
+        );
+
+        let val = i16x8_shr(
+            i16x8_add(i16x8_mul(val_top, w_8_yf), i16x8_mul(val_bot, w_yf)),
+            3,
+        );
+
+        let r1 = unsafe { v128_load64_zero(ptr1.add(i * stride1) as *const u64) };
+        let r1_16 = u16x8_extend_low_u8x16(r1);
+
+        v[i] = i16x8_sub(r1_16 as v128, val);
+    }
+
+    unsafe { hadamard_butterfly(&mut v) };
+    unsafe { transpose_8x8_i16(&mut v) };
+    unsafe { hadamard_butterfly(&mut v) };
+
+    let mut sum = u32x4_splat(0);
+    for i in 0..8 {
+        sum = i32x4_add(sum, i32x4_extadd_pairwise_i16x8(i16x8_abs(v[i])));
+    }
+
+    (i32x4_extract_lane::<0>(sum)
+        + i32x4_extract_lane::<1>(sum)
+        + i32x4_extract_lane::<2>(sum)
+        + i32x4_extract_lane::<3>(sum)) as u32
+        / 2
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn get_sad_8x8(
     p1: &Plane<u8>,
     p2: &Plane<u8>,
@@ -854,6 +1062,98 @@ fn get_sad_8x8(
         }
     }
     sum
+}
+
+#[cfg(target_arch = "wasm32")]
+fn get_sad_8x8(
+    p1: &Plane<u8>,
+    p2: &Plane<u8>,
+    x1: usize,
+    y1: usize,
+    mv_col: i16,
+    mv_row: i16,
+) -> u32 {
+    let x2 = (x1 as isize + mv_col as isize) as usize;
+    let y2 = (y1 as isize + mv_row as isize) as usize;
+
+    let stride1 = p1.geometry().stride.get();
+    let stride2 = p2.geometry().stride.get();
+    let ptr1 = unsafe { p1.data().as_ptr().add(y1 * stride1 + x1) };
+    let ptr2 = unsafe { p2.data().as_ptr().add(y2 * stride2 + x2) };
+
+    let mut sum = u32x4_splat(0);
+
+    for i in 0..8 {
+        let r1 = unsafe { v128_load64_zero(ptr1.add(i * stride1) as *const u64) };
+        let r2 = unsafe { v128_load64_zero(ptr2.add(i * stride2) as *const u64) };
+
+        let diff = v128_or(u8x16_sub_sat(r1, r2), u8x16_sub_sat(r2, r1));
+
+        let diff_16 = u16x8_extend_low_u8x16(diff);
+        sum = i32x4_add(sum, i32x4_extadd_pairwise_i16x8(diff_16 as v128));
+    }
+
+    (i32x4_extract_lane::<0>(sum)
+        + i32x4_extract_lane::<1>(sum)
+        + i32x4_extract_lane::<2>(sum)
+        + i32x4_extract_lane::<3>(sum)) as u32
+}
+
+#[cfg(target_arch = "wasm32")]
+unsafe fn hadamard_butterfly(v: &mut [v128; 8]) {
+    for i in (0..8).step_by(2) {
+        let a = v[i];
+        let b = v[i + 1];
+        v[i] = i16x8_add(a, b);
+        v[i + 1] = i16x8_sub(a, b);
+    }
+    for i in (0..8).step_by(4) {
+        for j in 0..2 {
+            let a = v[i + j];
+            let b = v[i + j + 2];
+            v[i + j] = i16x8_add(a, b);
+            v[i + j + 2] = i16x8_sub(a, b);
+        }
+    }
+    for i in 0..4 {
+        let a = v[i];
+        let b = v[i + 4];
+        v[i] = i16x8_add(a, b);
+        v[i + 4] = i16x8_sub(a, b);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+unsafe fn transpose_8x8_i16(v: &mut [v128; 8]) {
+    let t0 = i16x8_shuffle::<0, 8, 1, 9, 2, 10, 3, 11>(v[0], v[1]);
+    let t1 = i16x8_shuffle::<0, 8, 1, 9, 2, 10, 3, 11>(v[2], v[3]);
+    let t2 = i16x8_shuffle::<0, 8, 1, 9, 2, 10, 3, 11>(v[4], v[5]);
+    let t3 = i16x8_shuffle::<0, 8, 1, 9, 2, 10, 3, 11>(v[6], v[7]);
+
+    let t4 = i16x8_shuffle::<4, 12, 5, 13, 6, 14, 7, 15>(v[0], v[1]);
+    let t5 = i16x8_shuffle::<4, 12, 5, 13, 6, 14, 7, 15>(v[2], v[3]);
+    let t6 = i16x8_shuffle::<4, 12, 5, 13, 6, 14, 7, 15>(v[4], v[5]);
+    let t7 = i16x8_shuffle::<4, 12, 5, 13, 6, 14, 7, 15>(v[6], v[7]);
+
+    let m0 = i16x8_shuffle::<0, 1, 8, 9, 2, 3, 10, 11>(t0, t1);
+    let m1 = i16x8_shuffle::<4, 5, 12, 13, 6, 7, 14, 15>(t0, t1);
+    let m2 = i16x8_shuffle::<0, 1, 8, 9, 2, 3, 10, 11>(t2, t3);
+    let m3 = i16x8_shuffle::<4, 5, 12, 13, 6, 7, 14, 15>(t2, t3);
+
+    let m4 = i16x8_shuffle::<0, 1, 8, 9, 2, 3, 10, 11>(t4, t5);
+    let m5 = i16x8_shuffle::<4, 5, 12, 13, 6, 7, 14, 15>(t4, t5);
+    let m6 = i16x8_shuffle::<0, 1, 8, 9, 2, 3, 10, 11>(t6, t7);
+    let m7 = i16x8_shuffle::<4, 5, 12, 13, 6, 7, 14, 15>(t6, t7);
+
+    v[0] = i16x8_shuffle::<0, 1, 2, 3, 8, 9, 10, 11>(m0, m2);
+    v[1] = i16x8_shuffle::<4, 5, 6, 7, 12, 13, 14, 15>(m0, m2);
+    v[2] = i16x8_shuffle::<0, 1, 2, 3, 8, 9, 10, 11>(m1, m3);
+    v[3] = i16x8_shuffle::<4, 5, 6, 7, 12, 13, 14, 15>(m1, m3);
+
+    v[4] = i16x8_shuffle::<0, 1, 2, 3, 8, 9, 10, 11>(m4, m6);
+    v[5] = i16x8_shuffle::<4, 5, 6, 7, 12, 13, 14, 15>(m4, m6);
+    v[6] = i16x8_shuffle::<0, 1, 2, 3, 8, 9, 10, 11>(m5, m7);
+    v[7] = i16x8_shuffle::<4, 5, 6, 7, 12, 13, 14, 15>(m5, m7);
 }
 
 fn estimate_intra_costs(
