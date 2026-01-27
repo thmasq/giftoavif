@@ -1,12 +1,14 @@
 #![allow(dead_code)]
 #![allow(clippy::too_many_arguments)]
 
-use rayon::prelude::*;
+use rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
 use std::cmp;
 use std::collections::BTreeMap;
-use std::num::NonZero;
+use std::num::{NonZeroU8, NonZeroUsize};
 use std::sync::{Arc, RwLock};
+use v_frame::chroma::ChromaSubsampling;
 use v_frame::frame::Frame;
+use v_frame::frame::FrameBuilder;
 use v_frame::plane::Plane;
 
 const IMP_BLOCK_SIZE: usize = 8;
@@ -137,9 +139,11 @@ impl FrameMEStats {
             rows,
         }
     }
+
     fn get(&self, x: usize, y: usize) -> MEStats {
         self.stats[y * self.cols + x]
     }
+
     fn get_mut(&mut self, x: usize, y: usize) -> &mut MEStats {
         &mut self.stats[y * self.cols + x]
     }
@@ -154,17 +158,59 @@ pub struct SceneChangeDetector {
     deque_offset: usize,
     score_deque: Vec<ScenecutResult>,
     intra_costs: BTreeMap<usize, Box<[u32]>>,
-    frame_me_stats_buffer: Option<Arc<RwLock<[FrameMEStats; REF_FRAMES]>>>,
-    temp_plane: Option<Plane<u8>>,
+    frame_me_stats_buffer: Arc<RwLock<[FrameMEStats; REF_FRAMES]>>,
+    temp_plane: Plane<u8>,
     detection_speed: SceneDetectionSpeed,
     downscaling_factor: usize,
     scaled_resolution: (usize, usize),
-    downscaled_frame_buffer: Option<[Plane<u8>; 2]>,
+    downscaled_frame_buffer: [Plane<u8>; 2],
+    last_analyzed_frame: Option<Arc<Frame<u8>>>,
 }
 
 impl SceneChangeDetector {
-    pub fn new(opts: DetectionOptions) -> Self {
+    pub fn new(opts: DetectionOptions, width: usize, height: usize) -> Self {
         let threshold = 18.0 * (opts.bit_depth as f64) / 8.0;
+
+        let small_edge = cmp::min(width, height);
+        let downscaling_factor = match opts.scene_detection_speed {
+            SceneDetectionSpeed::Fast => match small_edge {
+                0..=240 => 1,
+                241..=480 => 2,
+                481..=720 => 4,
+                721..=1080 => 8,
+                1081..=1600 => 16,
+                _ => 32,
+            },
+            _ => 1,
+        };
+
+        let scaled_width = width / downscaling_factor;
+        let scaled_height = height / downscaling_factor;
+
+        let build_plane = |w, h| {
+            FrameBuilder::new(
+                NonZeroUsize::new(w).unwrap(),
+                NonZeroUsize::new(h).unwrap(),
+                ChromaSubsampling::Monochrome,
+                NonZeroU8::new(8).unwrap(),
+            )
+            .build::<u8>()
+            .unwrap()
+            .y_plane
+        };
+
+        let downscaled_frame_buffer = [
+            build_plane(scaled_width, scaled_height),
+            build_plane(scaled_width, scaled_height),
+        ];
+
+        let me_cols = (width + 7) / 8;
+        let me_rows = (height + 7) / 8;
+        let frame_me_stats_buffer = Arc::new(RwLock::new(std::array::from_fn(|_| {
+            FrameMEStats::new(me_cols, me_rows)
+        })));
+
+        let temp_plane = build_plane(width, height);
 
         Self {
             threshold,
@@ -175,12 +221,13 @@ impl SceneChangeDetector {
             deque_offset: 5,
             score_deque: Vec::with_capacity(5 + opts.lookahead),
             intra_costs: BTreeMap::new(),
-            frame_me_stats_buffer: None,
-            temp_plane: None,
+            frame_me_stats_buffer,
+            temp_plane,
             detection_speed: opts.scene_detection_speed,
-            downscaling_factor: 1,
-            scaled_resolution: (0, 0),
-            downscaled_frame_buffer: None,
+            downscaling_factor,
+            scaled_resolution: (scaled_width, scaled_height),
+            downscaled_frame_buffer,
+            last_analyzed_frame: None,
         }
     }
 
@@ -239,6 +286,8 @@ impl SceneChangeDetector {
             SceneDetectionSpeed::Standard => self.cost_scenecut(frame1, frame2, input_frameno),
         };
 
+        self.last_analyzed_frame = Some(Arc::clone(frame2));
+
         if self.deque_offset > 0 {
             if input_frameno == 1 {
                 result.backward_adjusted_cost = 0.0;
@@ -278,73 +327,50 @@ impl SceneChangeDetector {
         frame2: &Arc<Frame<u8>>,
     ) -> ScenecutResult {
         if self.downscaling_factor == 1 {
-            let width = frame1.y_plane.width().get();
-            let height = frame1.y_plane.height().get();
-            let small_edge = cmp::min(width, height);
+            let sad = calculate_sad_plane(&frame1.y_plane, &frame2.y_plane);
+            let pixels = frame1.y_plane.width().get() * frame1.y_plane.height().get();
+            let delta = sad as f64 / pixels as f64;
+            return self.build_result(delta);
+        }
 
-            self.downscaling_factor = match small_edge {
-                0..=240 => 1,
-                241..=480 => 2,
-                481..=720 => 4,
-                721..=1080 => 8,
-                1081..=1600 => 16,
-                _ => 32,
-            };
+        let can_reuse_buffer = self
+            .last_analyzed_frame
+            .as_ref()
+            .map_or(false, |last| Arc::ptr_eq(frame1, last));
 
-            self.scaled_resolution = (
-                width / self.downscaling_factor,
-                height / self.downscaling_factor,
+        if can_reuse_buffer {
+            self.downscaled_frame_buffer.swap(0, 1);
+            downscale_in_place(
+                &frame2.y_plane,
+                &mut self.downscaled_frame_buffer[1],
+                self.downscaling_factor,
+            );
+        } else {
+            downscale_in_place(
+                &frame1.y_plane,
+                &mut self.downscaled_frame_buffer[0],
+                self.downscaling_factor,
+            );
+            downscale_in_place(
+                &frame2.y_plane,
+                &mut self.downscaled_frame_buffer[1],
+                self.downscaling_factor,
             );
         }
 
-        let delta = if self.downscaling_factor > 1 {
-            if self.downscaled_frame_buffer.is_none() {
-                use std::num::NonZeroUsize;
-                use v_frame::chroma::ChromaSubsampling;
-                use v_frame::frame::FrameBuilder;
+        let sad = calculate_sad_plane(
+            &self.downscaled_frame_buffer[0],
+            &self.downscaled_frame_buffer[1],
+        );
+        let delta = sad as f64 / (self.scaled_resolution.0 * self.scaled_resolution.1) as f64;
 
-                let new_frame = FrameBuilder::new(
-                    NonZeroUsize::new(self.scaled_resolution.0).unwrap(),
-                    NonZeroUsize::new(self.scaled_resolution.1).unwrap(),
-                    ChromaSubsampling::Monochrome,
-                    NonZero::new(8).unwrap(),
-                )
-                .build()
-                .unwrap();
+        self.build_result(delta)
+    }
 
-                let new_frame2 = FrameBuilder::new(
-                    NonZeroUsize::new(self.scaled_resolution.0).unwrap(),
-                    NonZeroUsize::new(self.scaled_resolution.1).unwrap(),
-                    ChromaSubsampling::Monochrome,
-                    NonZero::new(8).unwrap(),
-                )
-                .build()
-                .unwrap();
-
-                self.downscaled_frame_buffer = Some([new_frame.y_plane, new_frame2.y_plane]);
-            }
-
-            if let Some(buffer) = &mut self.downscaled_frame_buffer {
-                buffer.swap(0, 1);
-
-                downscale_in_place(&frame2.y_plane, &mut buffer[1], self.downscaling_factor);
-
-                downscale_in_place(&frame1.y_plane, &mut buffer[0], self.downscaling_factor);
-
-                let sad = calculate_sad_plane(&buffer[0], &buffer[1]);
-                sad as f64 / (self.scaled_resolution.0 * self.scaled_resolution.1) as f64
-            } else {
-                0.0
-            }
-        } else {
-            let sad = calculate_sad_plane(&frame1.y_plane, &frame2.y_plane);
-            let pixels = frame1.y_plane.width().get() * frame1.y_plane.height().get();
-            sad as f64 / pixels as f64
-        };
-
+    fn build_result(&self, cost: f64) -> ScenecutResult {
         ScenecutResult {
-            inter_cost: delta,
-            imp_block_cost: delta,
+            inter_cost: cost,
+            imp_block_cost: cost,
             backward_adjusted_cost: 0.0,
             forward_adjusted_cost: 0.0,
             threshold: self.threshold,
@@ -357,28 +383,14 @@ impl SceneChangeDetector {
         frame2: &Arc<Frame<u8>>,
         input_frameno: usize,
     ) -> ScenecutResult {
-        let width = frame1.y_plane.width().get();
-        let height = frame1.y_plane.height().get();
-
-        if self.frame_me_stats_buffer.is_none() {
-            let cols = (width + 7) / 8;
-            let rows = (height + 7) / 8;
-            self.frame_me_stats_buffer = Some(Arc::new(RwLock::new(std::array::from_fn(|_| {
-                FrameMEStats::new(cols, rows)
-            }))));
-        }
-
         let mut intra_cost = 0.0;
         let mut inter_cost = 0.0;
         let mut imp_cost = 0.0;
-        let buffer = self.frame_me_stats_buffer.as_ref().unwrap().clone();
+        let buffer = self.frame_me_stats_buffer.clone();
 
         rayon::scope(|s| {
             s.spawn(|_| {
-                let temp = self
-                    .temp_plane
-                    .get_or_insert_with(|| frame2.y_plane.clone());
-                let costs = estimate_intra_costs(temp, frame2, self.bit_depth);
+                let costs = estimate_intra_costs(&mut self.temp_plane, frame2, self.bit_depth);
                 intra_cost =
                     costs.iter().map(|&c| c as u64).sum::<u64>() as f64 / costs.len() as f64;
                 self.intra_costs.insert(input_frameno, costs);
@@ -459,6 +471,145 @@ impl SceneChangeDetector {
     }
 }
 
+fn estimate_inter_costs(
+    frame: &Arc<Frame<u8>>,
+    ref_frame: &Arc<Frame<u8>>,
+    _bit_depth: usize,
+    buffer: Arc<RwLock<[FrameMEStats; REF_FRAMES]>>,
+    input_frameno: usize,
+) -> f64 {
+    let plane = &frame.y_plane;
+    let w_in_b = plane.width().get() / IMP_BLOCK_SIZE;
+    let h_in_b = plane.height().get() / IMP_BLOCK_SIZE;
+
+    let buf_idx = input_frameno % REF_FRAMES;
+    let prev_buf_idx = (input_frameno.wrapping_sub(1)) % REF_FRAMES;
+
+    let (prev_stats_snapshot, prev_cols) = {
+        let lock = buffer.read().unwrap();
+        (lock[prev_buf_idx].stats.clone(), lock[prev_buf_idx].cols)
+    };
+
+    let mut lock = buffer.write().unwrap();
+    let curr_stats = &mut lock[buf_idx].stats;
+
+    const ROWS_PER_TILE: usize = 8;
+    let chunk_size = w_in_b * ROWS_PER_TILE;
+
+    let total_cost: u64 = curr_stats
+        .par_chunks_mut(chunk_size)
+        .enumerate()
+        .map(|(tile_idx, tile_mvs)| {
+            let tile_start_y = tile_idx * ROWS_PER_TILE;
+            let mut tile_cost = 0;
+
+            let mut top_row_mvs = vec![MotionVector::default(); w_in_b];
+
+            for r in 0..ROWS_PER_TILE {
+                let y = tile_start_y + r;
+                if y >= h_in_b {
+                    break;
+                }
+
+                let mut left_mv = MotionVector::default();
+
+                for x in 0..w_in_b {
+                    let top_mv = if r == 0 {
+                        MotionVector::default()
+                    } else {
+                        top_row_mvs[x]
+                    };
+
+                    let me_result = estimate_motion(
+                        x,
+                        y,
+                        &frame.y_plane,
+                        &ref_frame.y_plane,
+                        &prev_stats_snapshot,
+                        prev_cols,
+                        left_mv,
+                        top_mv,
+                    );
+
+                    let flat_idx = r * w_in_b + x;
+                    tile_mvs[flat_idx] = me_result;
+
+                    tile_cost += me_result.sad as u64;
+
+                    left_mv = me_result.mv;
+                    top_row_mvs[x] = me_result.mv;
+                }
+            }
+            tile_cost
+        })
+        .sum();
+
+    total_cost as f64 / (w_in_b * h_in_b) as f64
+}
+
+fn estimate_motion(
+    bx: usize,
+    by: usize,
+    current: &Plane<u8>,
+    reference: &Plane<u8>,
+    prev_stats: &[MEStats],
+    prev_cols: usize,
+    left_mv: MotionVector,
+    top_mv: MotionVector,
+) -> MEStats {
+    let x = bx * IMP_BLOCK_SIZE;
+    let y = by * IMP_BLOCK_SIZE;
+
+    let predictors = get_subset_predictors(bx, by, prev_stats, prev_cols, left_mv, top_mv);
+
+    let mut best_mv = MotionVector::default();
+    let mut best_sad = u32::MAX;
+
+    for &mv in &predictors {
+        let sad = get_sad_8x8(current, reference, x, y, mv.col, mv.row);
+        if sad < best_sad {
+            best_sad = sad;
+            best_mv = mv;
+        }
+    }
+
+    best_mv = hexagon_search(current, reference, x, y, best_mv, &mut best_sad);
+    best_mv = square_refine(current, reference, x, y, best_mv, &mut best_sad);
+
+    let (final_mv, final_satd) = subpel_refine(current, reference, x, y, best_mv);
+
+    MEStats {
+        mv: final_mv,
+        sad: final_satd,
+    }
+}
+
+fn get_subset_predictors(
+    bx: usize,
+    by: usize,
+    prev_stats: &[MEStats],
+    prev_cols: usize,
+    left_mv: MotionVector,
+    top_mv: MotionVector,
+) -> Vec<MotionVector> {
+    let mut preds = Vec::with_capacity(5);
+
+    preds.push(MotionVector::default());
+
+    if bx > 0 {
+        preds.push(left_mv);
+    }
+    if by > 0 {
+        preds.push(top_mv);
+    }
+
+    if by < prev_stats.len() / prev_cols && bx < prev_cols {
+        preds.push(prev_stats[by * prev_cols + bx].mv);
+    }
+
+    preds
+}
+
 fn downscale_in_place(src: &Plane<u8>, dst: &mut Plane<u8>, scale: usize) {
     let src_width = src.width().get();
     let dst_width = dst.width().get();
@@ -507,106 +658,6 @@ fn calculate_sad_plane(p1: &Plane<u8>, p2: &Plane<u8>) -> u64 {
         }
     }
     sum
-}
-
-fn estimate_inter_costs(
-    frame: &Arc<Frame<u8>>,
-    ref_frame: &Arc<Frame<u8>>,
-    _bit_depth: usize,
-    buffer: Arc<RwLock<[FrameMEStats; REF_FRAMES]>>,
-    input_frameno: usize,
-) -> f64 {
-    let plane = &frame.y_plane;
-    let w_in_b = plane.width().get() / IMP_BLOCK_SIZE;
-    let h_in_b = plane.height().get() / IMP_BLOCK_SIZE;
-
-    let buf_idx = input_frameno % REF_FRAMES;
-    let prev_buf_idx = (input_frameno.wrapping_sub(1)) % REF_FRAMES;
-
-    let prev_stats_snapshot = {
-        let lock = buffer.read().unwrap();
-        lock[prev_buf_idx].stats.clone()
-    };
-
-    let prev_cols = {
-        let lock = buffer.read().unwrap();
-        lock[prev_buf_idx].cols
-    };
-
-    let rows: Vec<usize> = (0..h_in_b).collect();
-
-    let total_cost: u64 = rows
-        .par_iter()
-        .map(|&y| {
-            let mut row_cost = 0;
-            let mut row_mvs = Vec::with_capacity(w_in_b);
-
-            for x in 0..w_in_b {
-                let me_result = estimate_motion(
-                    x,
-                    y,
-                    &frame.y_plane,
-                    &ref_frame.y_plane,
-                    &prev_stats_snapshot,
-                    prev_cols,
-                    w_in_b,
-                );
-
-                let cost = me_result.sad;
-                row_cost += cost as u64;
-                row_mvs.push(me_result);
-            }
-
-            {
-                let mut lock = buffer.write().unwrap();
-                let stats = &mut lock[buf_idx];
-                for (x, me_stats) in row_mvs.into_iter().enumerate() {
-                    *stats.get_mut(x, y) = me_stats;
-                }
-            }
-
-            row_cost
-        })
-        .sum();
-
-    total_cost as f64 / (w_in_b * h_in_b) as f64
-}
-
-fn estimate_motion(
-    bx: usize,
-    by: usize,
-    current: &Plane<u8>,
-    reference: &Plane<u8>,
-    prev_stats: &[MEStats],
-    prev_cols: usize,
-    curr_cols: usize,
-) -> MEStats {
-    let x = bx * IMP_BLOCK_SIZE;
-    let y = by * IMP_BLOCK_SIZE;
-
-    let predictors = get_subset_predictors(bx, by, prev_stats, prev_cols, curr_cols);
-
-    let mut best_mv = MotionVector::default();
-    let mut best_sad = u32::MAX;
-
-    for &mv in &predictors {
-        let sad = get_sad_8x8(current, reference, x, y, mv.col, mv.row);
-        if sad < best_sad {
-            best_sad = sad;
-            best_mv = mv;
-        }
-    }
-
-    best_mv = hexagon_search(current, reference, x, y, best_mv, &mut best_sad);
-
-    best_mv = square_refine(current, reference, x, y, best_mv, &mut best_sad);
-
-    let (final_mv, final_satd) = subpel_refine(current, reference, x, y, best_mv);
-
-    MEStats {
-        mv: final_mv,
-        sad: final_satd,
-    }
 }
 
 const HEXAGON_PATTERN: [MotionVector; 6] = [
@@ -689,8 +740,7 @@ fn subpel_refine(
     y: usize,
     full_mv: MotionVector,
 ) -> (MotionVector, u32) {
-    let center_mv = full_mv << 3;
-    let mut best_mv = center_mv;
+    let mut best_mv = full_mv << 3;
     let mut best_satd = get_satd_inter(cur, ref_p, x, y, best_mv);
 
     let step = 4;
@@ -716,31 +766,6 @@ fn subpel_refine(
     }
 
     (best_mv, best_satd)
-}
-
-fn get_subset_predictors(
-    bx: usize,
-    by: usize,
-    prev_stats: &[MEStats],
-    prev_cols: usize,
-    _curr_cols: usize,
-) -> Vec<MotionVector> {
-    let mut preds = Vec::with_capacity(4);
-
-    preds.push(MotionVector::default());
-
-    if by < prev_stats.len() / prev_cols && bx < prev_cols {
-        preds.push(prev_stats[by * prev_cols + bx].mv);
-    }
-
-    if bx > 0 {
-        preds.push(prev_stats[by * prev_cols + bx - 1].mv);
-    }
-    if by > 0 {
-        preds.push(prev_stats[(by - 1) * prev_cols + bx].mv);
-    }
-
-    preds
 }
 
 #[inline(always)]
