@@ -9,6 +9,15 @@ mod isobmff;
 mod resampler;
 
 #[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &str);
+
+    #[wasm_bindgen(js_namespace = performance, js_name = now)]
+    fn performance_now() -> f64;
+}
+
+#[wasm_bindgen]
 pub fn gif_to_avif(
     gif_data: &[u8],
     fps: Option<u32>,
@@ -35,15 +44,12 @@ pub fn gif_to_avif(
         return Err("No frames found in GIF".into());
     }
 
+    let is_opaque = frames
+        .iter()
+        .all(|frame| frame.buffer().pixels().all(|p| p[3] == 255));
+
     let width = frames[0].buffer().width();
     let height = frames[0].buffer().height();
-
-    let resampler_iter = resampler::Resampler::new(
-        frames,
-        target_fps,
-        target_playback_speed as f64,
-        should_interpolate,
-    );
 
     let mut color_manager = encoder::EncoderManager::new(
         width as usize,
@@ -54,38 +60,70 @@ pub fn gif_to_avif(
         false,
     );
 
-    let mut alpha_manager = encoder::EncoderManager::new(
-        width as usize,
-        height as usize,
-        target_speed,
-        target_crf,
+    let mut alpha_manager = if !is_opaque {
+        Some(encoder::EncoderManager::new(
+            width as usize,
+            height as usize,
+            target_speed,
+            target_crf,
+            target_fps,
+            true,
+        ))
+    } else {
+        None
+    };
+
+    let mut resampler_iter = resampler::Resampler::new(
+        frames,
         target_fps,
-        true,
+        target_playback_speed as f64,
+        should_interpolate,
     );
 
-    for buffer in resampler_iter {
-        let color_yuv = frame_utils::to_rav1e_yuv(&buffer, &color_manager.ctx);
-        color_manager
-            .ctx
-            .send_frame(color_yuv)
-            .map_err(|e| format!("{:?}", e))?;
+    loop {
+        let frame_opt = resampler_iter.next();
 
-        let alpha_yuv = frame_utils::extract_alpha(&buffer, &alpha_manager.ctx);
-        alpha_manager
-            .ctx
-            .send_frame(alpha_yuv)
-            .map_err(|e| format!("{:?}", e))?;
+        match frame_opt {
+            Some(buffer) => {
+                let color_yuv = frame_utils::to_rav1e_yuv(&buffer, &color_manager.ctx);
+
+                let alpha_yuv = if let Some(am) = &alpha_manager {
+                    Some(frame_utils::extract_alpha(&buffer, &am.ctx))
+                } else {
+                    None
+                };
+
+                color_manager
+                    .ctx
+                    .send_frame(color_yuv)
+                    .map_err(|e| format!("{:?}", e))?;
+
+                if let Some(am) = &mut alpha_manager {
+                    if let Some(ay) = alpha_yuv {
+                        am.ctx.send_frame(ay).map_err(|e| format!("{:?}", e))?;
+                    }
+                }
+            }
+            None => break,
+        }
     }
 
     color_manager.ctx.flush();
-    alpha_manager.ctx.flush();
+    if let Some(am) = &mut alpha_manager {
+        am.ctx.flush();
+    }
 
     let color_frames = color_manager.collect_frames()?;
-    let alpha_frames = alpha_manager.collect_frames()?;
+
+    let alpha_frames_vec = if let Some(mut am) = alpha_manager {
+        Some(am.collect_frames()?)
+    } else {
+        None
+    };
 
     let output = isobmff::serialize_to_vec(
         &color_frames,
-        Some(&alpha_frames),
+        alpha_frames_vec.as_deref(),
         width,
         height,
         target_fps,
