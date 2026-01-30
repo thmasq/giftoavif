@@ -2,7 +2,7 @@ use rav1e::{
     color::{
         ColorDescription, ColorPrimaries, MatrixCoefficients, PixelRange, TransferCharacteristics,
     },
-    prelude::{ChromaSampling, Config, Context, EncoderConfig, EncoderStatus, Rational},
+    prelude::{ChromaSubsampling, Config, Context, EncoderConfig, EncoderStatus, Rational},
 };
 
 pub struct EncoderManager {
@@ -24,10 +24,10 @@ impl EncoderManager {
         enc.tiles = 4;
 
         if is_alpha {
-            enc.chroma_sampling = ChromaSampling::Cs400;
+            enc.chroma_sampling = ChromaSubsampling::Monochrome;
             enc.pixel_range = PixelRange::Full;
         } else {
-            enc.chroma_sampling = ChromaSampling::Cs420;
+            enc.chroma_sampling = ChromaSubsampling::Yuv420;
             enc.pixel_range = PixelRange::Limited;
         }
 
