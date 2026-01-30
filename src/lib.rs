@@ -145,12 +145,12 @@ pub fn gif_to_avif(
 
     let color_frames_owned: Vec<Frame<u8>> = color_frames
         .into_iter()
-        .map(|a| Arc::try_unwrap(a).unwrap())
+        .map(|a| Arc::try_unwrap(a).unwrap_or_else(|_| panic!("Failed to unwrap Arc")))
         .collect();
 
     let alpha_frames_owned = alpha_frames.map(|v| {
         v.into_iter()
-            .map(|a| Arc::try_unwrap(a).unwrap())
+            .map(|a| Arc::try_unwrap(a).unwrap_or_else(|_| panic!("Failed to unwrap Arc")))
             .collect::<Vec<_>>()
     });
 

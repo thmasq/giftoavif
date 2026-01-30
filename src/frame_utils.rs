@@ -16,10 +16,14 @@ pub fn to_rav1e_yuv(img: &RgbaImage, ctx: &Context<u8>) -> Frame<u8> {
         y_data.push(y.clamp(0.0, 255.0) as u8);
     }
 
-    frame.planes[0].copy_from_raw_u8(&y_data, width, 1);
+    let y_plane = &mut frame.y_plane;
+    for (dst_row, src_row) in y_plane.rows_mut().zip(y_data.chunks(width)) {
+        dst_row[..width].copy_from_slice(src_row);
+    }
 
-    let u_width = frame.planes[1].cfg.width;
-    let u_height = frame.planes[1].cfg.height;
+    let u_plane = frame.u_plane.as_mut().unwrap();
+    let u_width = u_plane.width().get();
+    let u_height = u_plane.height().get();
 
     let ss_x = if u_width < width { 1 } else { 0 };
     let ss_y = if u_height < height { 1 } else { 0 };
@@ -64,8 +68,16 @@ pub fn to_rav1e_yuv(img: &RgbaImage, ctx: &Context<u8>) -> Frame<u8> {
         }
     }
 
-    frame.planes[1].copy_from_raw_u8(&u_data, u_width, 1);
-    frame.planes[2].copy_from_raw_u8(&v_data, u_width, 1);
+    // FIX: Copy data to U and V planes row by row
+    let u_plane = frame.u_plane.as_mut().unwrap();
+    for (dst_row, src_row) in u_plane.rows_mut().zip(u_data.chunks(u_width)) {
+        dst_row[..u_width].copy_from_slice(src_row);
+    }
+
+    let v_plane = frame.v_plane.as_mut().unwrap();
+    for (dst_row, src_row) in v_plane.rows_mut().zip(v_data.chunks(u_width)) {
+        dst_row[..u_width].copy_from_slice(src_row);
+    }
 
     frame
 }
@@ -74,11 +86,14 @@ pub fn extract_alpha(img: &RgbaImage, ctx: &Context<u8>) -> Frame<u8> {
     let mut frame = ctx.new_frame();
     let width = img.width() as usize;
 
-    let plane_y = &mut frame.planes[0];
+    let plane_y = &mut frame.y_plane;
 
     let alpha_data: Vec<u8> = img.pixels().map(|p| p[3]).collect();
 
-    plane_y.copy_from_raw_u8(&alpha_data, width, 1);
+    // FIX: Copy alpha data row by row
+    for (dst_row, src_row) in plane_y.rows_mut().zip(alpha_data.chunks(width)) {
+        dst_row[..width].copy_from_slice(src_row);
+    }
 
     frame
 }
