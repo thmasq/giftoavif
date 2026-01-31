@@ -12,7 +12,7 @@ byteorder = "1.5.0"
 image = { version = "0.25.9", default-features = false, features = ["gif"] }
 log = "0.4.29"
 pixel_formats = "0.1.5"
-rav1e = { git = "https://github.com/thmasq/rav1e", tag = "0.8.7", features = ["wasm"] }
+rav1e = { git = "https://github.com/thmasq/rav1e", tag = "0.8.8", features = ["wasm"] }
 rayon = { version = "1.11.0", features = ["web_spin_lock"] }
 v_frame = { version = "0.5.0", features = ["padding_api"] }
 wasm-bindgen = "0.2.108"

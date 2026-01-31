@@ -216,9 +216,9 @@ checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
 
 [[package]]
 name = "bytemuck"
-version = "1.24.0"
+version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
+checksum = "c8efb64bd706a16a1bdde310ae86b351e4d21550d98d056f22f8a7f7a2183fec"
 dependencies = [
  "bytemuck_derive",
 ]
@@ -710,7 +710,7 @@ dependencies = [
 [[package]]
 name = "ivf"
 version = "0.1.4"
-source = "git+https://github.com/thmasq/rav1e?tag=0.8.7#0573fb7f6bbb2a5853bee924f099e67a46c56156"
+source = "git+https://github.com/thmasq/rav1e?tag=0.8.8#8848d44bb5eaf66372d784c47fcdf379709eda62"
 dependencies = [
  "bitstream-io",
 ]
@@ -1054,8 +1054,8 @@ dependencies = [
 
 [[package]]
 name = "rav1e"
-version = "0.8.7"
-source = "git+https://github.com/thmasq/rav1e?tag=0.8.7#0573fb7f6bbb2a5853bee924f099e67a46c56156"
+version = "0.8.8"
+source = "git+https://github.com/thmasq/rav1e?tag=0.8.8#8848d44bb5eaf66372d784c47fcdf379709eda62"
 dependencies = [
  "aligned-vec",
  "arbitrary",
