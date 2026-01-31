@@ -205,8 +205,8 @@ pub fn gif_to_avif(
             let alpha_chunk = alpha_chunks.as_ref().map(|chunks| chunks[i].clone());
 
             let mut chunk_color_manager = encoder::EncoderManager::new(
-                width as usize,
-                height as usize,
+                enc_width as usize,
+                enc_height as usize,
                 target_speed,
                 target_crf,
                 target_fps,
@@ -215,8 +215,8 @@ pub fn gif_to_avif(
 
             let chunk_alpha_manager = if alpha_chunk.is_some() {
                 Some(encoder::EncoderManager::new(
-                    width as usize,
-                    height as usize,
+                    enc_width as usize,
+                    enc_height as usize,
                     target_speed,
                     target_crf,
                     target_fps,

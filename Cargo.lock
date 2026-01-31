@@ -710,7 +710,7 @@ dependencies = [
 [[package]]
 name = "ivf"
 version = "0.1.4"
-source = "git+https://github.com/thmasq/rav1e?tag=0.8.4#aa3491e4032542fd87ecea76dfc0f84481be7c62"
+source = "git+https://github.com/thmasq/rav1e?tag=0.8.7#0573fb7f6bbb2a5853bee924f099e67a46c56156"
 dependencies = [
  "bitstream-io",
 ]
@@ -1054,8 +1054,8 @@ dependencies = [
 
 [[package]]
 name = "rav1e"
-version = "0.8.4"
-source = "git+https://github.com/thmasq/rav1e?tag=0.8.4#aa3491e4032542fd87ecea76dfc0f84481be7c62"
+version = "0.8.7"
+source = "git+https://github.com/thmasq/rav1e?tag=0.8.7#0573fb7f6bbb2a5853bee924f099e67a46c56156"
 dependencies = [
  "aligned-vec",
  "arbitrary",
