@@ -1,8 +1,8 @@
+use av_scenechange::{Rational32, SceneChangeDetector, SceneDetectionSpeed};
 use image::AnimationDecoder;
 use image::codecs::gif::GifDecoder;
-use rav1e::prelude::Frame;
+use rav1e::prelude::{ChromaSubsampling, Frame};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use scene_change::{DetectionOptions, SceneChangeDetector, SceneDetectionSpeed};
 use std::io::Cursor;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -13,7 +13,6 @@ mod encoder;
 mod frame_utils;
 mod isobmff;
 mod resampler;
-mod scene_change;
 
 #[wasm_bindgen]
 extern "C" {
@@ -24,25 +23,28 @@ extern "C" {
     fn performance_now() -> f64;
 }
 
-fn get_rav1e_detector_config(width: usize, height: usize, speed_preset: u8) -> SceneChangeDetector {
+fn get_rav1e_detector_config(
+    width: usize,
+    height: usize,
+    speed_preset: u8,
+    fps: u32,
+) -> SceneChangeDetector<u8> {
     let detection_mode = if speed_preset >= 10 {
         SceneDetectionSpeed::Fast
     } else {
         SceneDetectionSpeed::Standard
     };
 
-    let opts = DetectionOptions {
-        use_chroma: true,
-        bit_depth: 8,
-        ignore_flashes: false,
-        min_scenecut_distance: Some(12),
-        max_scenecut_distance: Some(240),
-        lookahead: 5,
-        scene_detection_speed: detection_mode,
-        ..Default::default()
-    };
-
-    SceneChangeDetector::new(opts, width, height)
+    SceneChangeDetector::new(
+        (width, height),
+        8,
+        Rational32::new(fps as i32, 1),
+        ChromaSubsampling::Yuv420,
+        5,
+        detection_mode,
+        12,
+        240,
+    )
 }
 
 #[wasm_bindgen]
@@ -125,7 +127,8 @@ pub fn gif_to_avif(
 
     let mut keyframes = vec![0];
     {
-        let mut detector = get_rav1e_detector_config(width as usize, height as usize, target_speed);
+        let mut detector =
+            get_rav1e_detector_config(width as usize, height as usize, target_speed, target_fps);
         let mut last_keyframe = 0;
 
         let frame_refs: Vec<&Arc<Frame<u8>>> = color_frames.iter().collect();
@@ -136,7 +139,8 @@ pub fn gif_to_avif(
             let end = (i + lookahead).min(color_frames.len());
             let window = &frame_refs[i..end];
 
-            if detector.analyze_next_frame(window, i, last_keyframe) {
+            let (is_scenecut, _score) = detector.analyze_next_frame(window, i, last_keyframe);
+            if is_scenecut {
                 keyframes.push(i);
                 last_keyframe = i;
             }
