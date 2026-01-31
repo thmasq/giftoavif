@@ -19,9 +19,10 @@ wasm-bindgen = "0.2.108"
 wasm-bindgen-rayon = { version = "1.3.0", features = ["nightly", "no-bundler"] }
 zerocopy = "0.8.33"
 av-scenechange = { git = "https://github.com/thmasq/av-scenechange", tag = "0.22.3", default-features = false }
+console_error_panic_hook = "0.1.7"
 
 [profile.release]
-panic = "abort"
 lto = "fat"
 opt-level = 3
 codegen-units = 1
+debug = true

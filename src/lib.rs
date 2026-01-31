@@ -23,6 +23,11 @@ extern "C" {
     fn performance_now() -> f64;
 }
 
+#[wasm_bindgen(start)]
+pub fn main_js() {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+}
+
 fn get_rav1e_detector_config(
     width: usize,
     height: usize,
@@ -81,9 +86,14 @@ pub fn gif_to_avif(
     let width = frames[0].buffer().width();
     let height = frames[0].buffer().height();
 
+    log(&format!("Initializing Encoder: {}x{}", width, height));
+
+    let enc_width = if width & 1 == 1 { width + 1 } else { width };
+    let enc_height = if height & 1 == 1 { height + 1 } else { height };
+
     let alloc_manager = encoder::EncoderManager::new(
-        width as usize,
-        height as usize,
+        enc_width as usize,
+        enc_height as usize,
         target_speed,
         target_crf,
         target_fps,
@@ -106,8 +116,8 @@ pub fn gif_to_avif(
 
     let alpha_frames: Option<Vec<Arc<Frame<u8>>>> = if !is_opaque {
         let alpha_ctx = encoder::EncoderManager::new(
-            width as usize,
-            height as usize,
+            enc_width as usize,
+            enc_height as usize,
             target_speed,
             target_crf,
             target_fps,
@@ -127,8 +137,12 @@ pub fn gif_to_avif(
 
     let mut keyframes = vec![0];
     {
-        let mut detector =
-            get_rav1e_detector_config(width as usize, height as usize, target_speed, target_fps);
+        let mut detector = get_rav1e_detector_config(
+            enc_width as usize,
+            enc_height as usize,
+            target_speed,
+            target_fps,
+        );
         let mut last_keyframe = 0;
 
         let frame_refs: Vec<&Arc<Frame<u8>>> = color_frames.iter().collect();
