@@ -86,10 +86,13 @@ pub fn gif_to_avif(
     let width = frames[0].buffer().width();
     let height = frames[0].buffer().height();
 
-    log(&format!("Initializing Encoder: {}x{}", width, height));
+    let enc_width = (width + 63) & !63;
+    let enc_height = (height + 63) & !63;
 
-    let enc_width = if width & 1 == 1 { width + 1 } else { width };
-    let enc_height = if height & 1 == 1 { height + 1 } else { height };
+    log(&format!(
+        "Initializing Encoder: {}x{} (Padded from {}x{})",
+        enc_width, enc_height, width, height
+    ));
 
     let alloc_manager = encoder::EncoderManager::new(
         enc_width as usize,
@@ -160,6 +163,12 @@ pub fn gif_to_avif(
             }
         }
     }
+
+    log(&format!(
+        "Scene detection complete. Video divided into {} section{}.",
+        keyframes.len(),
+        if keyframes.len() == 1 { "" } else { "s" }
+    ));
 
     let color_frames_owned: Vec<Frame<u8>> = color_frames
         .into_iter()

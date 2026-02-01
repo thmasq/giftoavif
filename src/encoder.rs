@@ -21,7 +21,7 @@ impl EncoderManager {
         };
         enc.enable_timing_info = true;
 
-        enc.tiles = 4;
+        enc.tiles = 1;
 
         if is_alpha {
             enc.chroma_sampling = ChromaSubsampling::Monochrome;

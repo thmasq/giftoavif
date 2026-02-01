@@ -3,6 +3,21 @@ use rav1e::prelude::{Context, Frame};
 
 pub fn to_rav1e_yuv(img: &RgbaImage, ctx: &Context<u8>) -> Frame<u8> {
     let mut frame = ctx.new_frame();
+
+    for row in frame.y_plane.rows_mut() {
+        row.fill(0);
+    }
+    if let Some(u) = &mut frame.u_plane {
+        for row in u.rows_mut() {
+            row.fill(128);
+        }
+    }
+    if let Some(v) = &mut frame.v_plane {
+        for row in v.rows_mut() {
+            row.fill(128);
+        }
+    }
+
     let width = img.width() as usize;
     let height = img.height() as usize;
 
@@ -56,19 +71,23 @@ pub fn to_rav1e_yuv(img: &RgbaImage, ctx: &Context<u8>) -> Frame<u8> {
                 }
             }
 
-            let r = r_sum / count;
-            let g = g_sum / count;
-            let b = b_sum / count;
+            if count > 0.0 {
+                let r = r_sum / count;
+                let g = g_sum / count;
+                let b = b_sum / count;
 
-            let u = -0.1146 * r - 0.3854 * g + 0.5000 * b + 128.0;
-            let v = 0.5000 * r - 0.4542 * g - 0.0458 * b + 128.0;
+                let u = -0.1146 * r - 0.3854 * g + 0.5000 * b + 128.0;
+                let v = 0.5000 * r - 0.4542 * g - 0.0458 * b + 128.0;
 
-            u_data.push(u.clamp(0.0, 255.0) as u8);
-            v_data.push(v.clamp(0.0, 255.0) as u8);
+                u_data.push(u.clamp(0.0, 255.0) as u8);
+                v_data.push(v.clamp(0.0, 255.0) as u8);
+            } else {
+                u_data.push(128);
+                v_data.push(128);
+            }
         }
     }
 
-    // FIX: Copy data to U and V planes row by row
     let u_plane = frame.u_plane.as_mut().unwrap();
     for (dst_row, src_row) in u_plane.rows_mut().zip(u_data.chunks(u_width)) {
         dst_row[..u_width].copy_from_slice(src_row);
@@ -88,9 +107,12 @@ pub fn extract_alpha(img: &RgbaImage, ctx: &Context<u8>) -> Frame<u8> {
 
     let plane_y = &mut frame.y_plane;
 
+    for row in plane_y.rows_mut() {
+        row.fill(0);
+    }
+
     let alpha_data: Vec<u8> = img.pixels().map(|p| p[3]).collect();
 
-    // FIX: Copy alpha data row by row
     for (dst_row, src_row) in plane_y.rows_mut().zip(alpha_data.chunks(width)) {
         dst_row[..width].copy_from_slice(src_row);
     }
