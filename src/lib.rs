@@ -19,6 +19,11 @@ extern "C" {
     fn performance_now() -> f64;
 }
 
+#[wasm_bindgen(start)]
+pub fn main_js() {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+}
+
 #[wasm_bindgen]
 pub fn gif_to_avif(
     gif_data: &[u8],
@@ -52,6 +57,11 @@ pub fn gif_to_avif(
 
     let width = frames[0].buffer().width();
     let height = frames[0].buffer().height();
+
+    log(&format!(
+        "Initializing Encoder with resolution: {}x{}",
+        width, height
+    ));
 
     let mut color_manager = encoder::EncoderManager::new(
         width as usize,
