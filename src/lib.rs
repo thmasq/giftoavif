@@ -86,17 +86,14 @@ pub fn gif_to_avif(
     let width = frames[0].buffer().width();
     let height = frames[0].buffer().height();
 
-    let enc_width = (width + 63) & !63;
-    let enc_height = (height + 63) & !63;
-
     log(&format!(
-        "Initializing Encoder: {}x{} (Padded from {}x{})",
-        enc_width, enc_height, width, height
+        "Initializing Encoder with resolution: {}x{}",
+        width, height
     ));
 
-    let alloc_manager = encoder::EncoderManager::new(
-        enc_width as usize,
-        enc_height as usize,
+    let color_manager = encoder::EncoderManager::new(
+        width as usize,
+        height as usize,
         target_speed,
         target_crf,
         target_fps,
@@ -114,13 +111,13 @@ pub fn gif_to_avif(
 
     let color_frames: Vec<Arc<Frame<u8>>> = resampled_frames
         .iter()
-        .map(|img| Arc::new(frame_utils::to_rav1e_yuv(img, &alloc_manager.ctx)))
+        .map(|img| Arc::new(frame_utils::to_rav1e_yuv(img, &color_manager.ctx)))
         .collect();
 
     let alpha_frames: Option<Vec<Arc<Frame<u8>>>> = if !is_opaque {
         let alpha_ctx = encoder::EncoderManager::new(
-            enc_width as usize,
-            enc_height as usize,
+            width as usize,
+            height as usize,
             target_speed,
             target_crf,
             target_fps,
@@ -140,12 +137,8 @@ pub fn gif_to_avif(
 
     let mut keyframes = vec![0];
     {
-        let mut detector = get_rav1e_detector_config(
-            enc_width as usize,
-            enc_height as usize,
-            target_speed,
-            target_fps,
-        );
+        let mut detector =
+            get_rav1e_detector_config(width as usize, height as usize, target_speed, target_fps);
         let mut last_keyframe = 0;
 
         let frame_refs: Vec<&Arc<Frame<u8>>> = color_frames.iter().collect();
@@ -214,8 +207,8 @@ pub fn gif_to_avif(
             let alpha_chunk = alpha_chunks.as_ref().map(|chunks| chunks[i].clone());
 
             let mut chunk_color_manager = encoder::EncoderManager::new(
-                enc_width as usize,
-                enc_height as usize,
+                width as usize,
+                height as usize,
                 target_speed,
                 target_crf,
                 target_fps,
@@ -224,8 +217,8 @@ pub fn gif_to_avif(
 
             let chunk_alpha_manager = if alpha_chunk.is_some() {
                 Some(encoder::EncoderManager::new(
-                    enc_width as usize,
-                    enc_height as usize,
+                    width as usize,
+                    height as usize,
                     target_speed,
                     target_crf,
                     target_fps,

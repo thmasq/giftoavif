@@ -45,32 +45,20 @@ pub fn serialize_to_vec(
 
     let delta = MEDIA_TIMESCALE / fps;
 
-    let color_sync_samples: Vec<bool> = color_frames
-        .iter()
-        .map(|f| parse_sequence_header(f).is_some())
-        .collect();
-
     let color_config = parse_sequence_header(&color_frames[0])
         .ok_or("Failed to parse AV1 Sequence Header from first color frame")?;
 
-    let (alpha_config, alpha_sync_samples) = if let Some(frames) = alpha_frames {
+    let alpha_config = if let Some(frames) = alpha_frames {
         if !frames.is_empty() {
-            let samples: Vec<bool> = frames
-                .iter()
-                .map(|f| parse_sequence_header(f).is_some())
-                .collect();
-            (
-                Some(
-                    parse_sequence_header(&frames[0])
-                        .ok_or("Failed to parse AV1 Sequence Header from first alpha frame")?,
-                ),
-                Some(samples),
+            Some(
+                parse_sequence_header(&frames[0])
+                    .ok_or("Failed to parse AV1 Sequence Header from first alpha frame")?,
             )
         } else {
-            (None, None)
+            None
         }
     } else {
-        (None, None)
+        None
     };
 
     let mut mdat_payload = Vec::new();
@@ -125,13 +113,11 @@ pub fn serialize_to_vec(
         &color_config,
         alpha_config.as_ref(),
         &color_chunk_sizes,
-        &color_sync_samples,
         if alpha_config.is_some() {
             Some(&alpha_chunk_sizes)
         } else {
             None
         },
-        alpha_sync_samples.as_deref(),
         0,
         delta,
     )?;
@@ -146,13 +132,11 @@ pub fn serialize_to_vec(
         &color_config,
         alpha_config.as_ref(),
         &color_chunk_sizes,
-        &color_sync_samples,
         if alpha_config.is_some() {
             Some(&alpha_chunk_sizes)
         } else {
             None
         },
-        alpha_sync_samples.as_deref(),
         mdat_start_offset as u32,
         delta,
     )?;
@@ -282,13 +266,13 @@ fn write_meta<W: Write + Seek>(
 
     write_ispe(w, width, height)?;
     write_pixi(w, 3, 8)?;
-    write_av1c(w, color_conf, false)?;
+    write_av1c(w, color_conf)?;
     write_colr(w, color_conf)?;
 
     if let Some(ac) = alpha_conf {
         write_ispe(w, width, height)?;
         write_pixi(w, 1, 8)?;
-        write_av1c(w, ac, false)?;
+        write_av1c(w, ac)?;
         let urn = b"urn:mpeg:mpegB:cicp:systems:auxiliary:alpha\0";
         write_full_box_header(w, b"auxC", 12 + urn.len() as u32, 0, 0)?;
         w.write_all(urn).map_err(|e| e.to_string())?;
@@ -302,22 +286,14 @@ fn write_meta<W: Write + Seek>(
     w.write_u16::<BE>(1).map_err(|e| e.to_string())?;
     w.write_u8(4).map_err(|e| e.to_string())?;
     for idx in 1..=4 {
-        let mut val = idx;
-        if idx == 3 {
-            val |= 0x80;
-        }
-        w.write_u8(val).map_err(|e| e.to_string())?;
+        w.write_u8(idx).map_err(|e| e.to_string())?;
     }
 
     if alpha_conf.is_some() {
         w.write_u16::<BE>(2).map_err(|e| e.to_string())?;
         w.write_u8(4).map_err(|e| e.to_string())?;
         for idx in 5..=8 {
-            let mut val = idx;
-            if idx == 7 {
-                val |= 0x80;
-            }
-            w.write_u8(val).map_err(|e| e.to_string())?;
+            w.write_u8(idx).map_err(|e| e.to_string())?;
         }
     }
     patch_box_size(w, ipma_start)?;
@@ -392,9 +368,7 @@ fn write_moov<W: Write + Seek>(
     color_config: &Av1SequenceInfo,
     alpha_config: Option<&Av1SequenceInfo>,
     color_sizes: &[u32],
-    color_sync_samples: &[bool],
     alpha_sizes: Option<&[u32]>,
-    alpha_sync_samples: Option<&[bool]>,
     mdat_start_offset: u32,
     delta: u32,
 ) -> Result<(), String> {
@@ -443,7 +417,6 @@ fn write_moov<W: Write + Seek>(
         color_config,
         color_sizes,
         &color_offsets,
-        color_sync_samples,
         false,
         None,
         delta,
@@ -451,7 +424,6 @@ fn write_moov<W: Write + Seek>(
     )?;
     if let Some(a_sizes) = alpha_sizes {
         let a_conf = alpha_config.expect("Alpha config missing");
-        let a_sync = alpha_sync_samples.expect("Alpha sync samples missing");
         write_track(
             w,
             2,
@@ -460,7 +432,6 @@ fn write_moov<W: Write + Seek>(
             a_conf,
             a_sizes,
             &alpha_offsets,
-            a_sync,
             true,
             Some(1),
             delta,
@@ -472,17 +443,6 @@ fn write_moov<W: Write + Seek>(
     Ok(())
 }
 
-struct Chunk {
-    offset: u32,
-    sample_count: u32,
-}
-
-struct StscEntry {
-    first_chunk: u32,
-    samples_per_chunk: u32,
-    id: u32,
-}
-
 fn write_track<W: Write + Seek>(
     w: &mut W,
     track_id: u32,
@@ -491,7 +451,6 @@ fn write_track<W: Write + Seek>(
     config: &Av1SequenceInfo,
     chunk_sizes: &[u32],
     chunk_offsets: &[u32],
-    sync_samples: &[bool],
     is_alpha: bool,
     ref_track: Option<u32>,
     delta: u32,
@@ -596,7 +555,7 @@ fn write_track<W: Write + Seek>(
     w.write_u16::<BE>(0x0018).map_err(|e| e.to_string())?;
     w.write_u16::<BE>(0xFFFF).map_err(|e| e.to_string())?;
 
-    write_av1c(w, config, false)?;
+    write_av1c(w, config)?;
     write_full_box_header(w, b"ccst", 16, 0, 0)?;
     w.write_u32::<BE>(0x7C000000).map_err(|e| e.to_string())?;
     if !is_alpha {
@@ -616,69 +575,15 @@ fn write_track<W: Write + Seek>(
         .map_err(|e| e.to_string())?;
     w.write_u32::<BE>(delta).map_err(|e| e.to_string())?;
 
-    let sync_count = sync_samples.iter().filter(|&&x| x).count();
-    if sync_count < chunk_sizes.len() {
-        write_stss(w, sync_samples)?;
-    }
+    write_full_box_header(w, b"stss", 20, 0, 0)?;
+    w.write_u32::<BE>(1).map_err(|e| e.to_string())?;
+    w.write_u32::<BE>(1).map_err(|e| e.to_string())?;
 
-    write_sdtp(w, sync_samples)?;
-
-    let mut chunks: Vec<Chunk> = Vec::new();
-    if !chunk_sizes.is_empty() {
-        let mut current_chunk = Chunk {
-            offset: chunk_offsets[0],
-            sample_count: 1,
-        };
-        let mut next_expected_offset = chunk_offsets[0] + chunk_sizes[0];
-
-        for i in 1..chunk_sizes.len() {
-            let offset = chunk_offsets[i];
-            let size = chunk_sizes[i];
-
-            if offset == next_expected_offset {
-                current_chunk.sample_count += 1;
-            } else {
-                chunks.push(current_chunk);
-                current_chunk = Chunk {
-                    offset,
-                    sample_count: 1,
-                };
-            }
-            next_expected_offset = offset + size;
-        }
-        chunks.push(current_chunk);
-    }
-
-    let mut stsc_entries: Vec<StscEntry> = Vec::new();
-    if !chunks.is_empty() {
-        let mut current_entry = StscEntry {
-            first_chunk: 1,
-            samples_per_chunk: chunks[0].sample_count,
-            id: 1,
-        };
-        for (i, chunk) in chunks.iter().enumerate().skip(1) {
-            if chunk.sample_count != current_entry.samples_per_chunk {
-                stsc_entries.push(current_entry);
-                current_entry = StscEntry {
-                    first_chunk: (i as u32) + 1,
-                    samples_per_chunk: chunk.sample_count,
-                    id: 1,
-                };
-            }
-        }
-        stsc_entries.push(current_entry);
-    }
-
-    write_full_box_header(w, b"stsc", 16 + stsc_entries.len() as u32 * 12, 0, 0)?;
-    w.write_u32::<BE>(stsc_entries.len() as u32)
-        .map_err(|e| e.to_string())?;
-    for entry in stsc_entries {
-        w.write_u32::<BE>(entry.first_chunk)
-            .map_err(|e| e.to_string())?;
-        w.write_u32::<BE>(entry.samples_per_chunk)
-            .map_err(|e| e.to_string())?;
-        w.write_u32::<BE>(entry.id).map_err(|e| e.to_string())?;
-    }
+    write_full_box_header(w, b"stsc", 28, 0, 0)?;
+    w.write_u32::<BE>(1).map_err(|e| e.to_string())?;
+    w.write_u32::<BE>(1).map_err(|e| e.to_string())?;
+    w.write_u32::<BE>(1).map_err(|e| e.to_string())?;
+    w.write_u32::<BE>(1).map_err(|e| e.to_string())?;
 
     write_full_box_header(w, b"stsz", 20 + chunk_sizes.len() as u32 * 4, 0, 0)?;
     w.write_u32::<BE>(0).map_err(|e| e.to_string())?;
@@ -688,11 +593,11 @@ fn write_track<W: Write + Seek>(
         w.write_u32::<BE>(*size).map_err(|e| e.to_string())?;
     }
 
-    write_full_box_header(w, b"stco", 16 + chunks.len() as u32 * 4, 0, 0)?;
-    w.write_u32::<BE>(chunks.len() as u32)
+    write_full_box_header(w, b"stco", 16 + chunk_offsets.len() as u32 * 4, 0, 0)?;
+    w.write_u32::<BE>(chunk_offsets.len() as u32)
         .map_err(|e| e.to_string())?;
-    for chunk in chunks {
-        w.write_u32::<BE>(chunk.offset).map_err(|e| e.to_string())?;
+    for offset in chunk_offsets {
+        w.write_u32::<BE>(*offset).map_err(|e| e.to_string())?;
     }
 
     patch_box_size(w, stbl_pos)?;
@@ -702,34 +607,9 @@ fn write_track<W: Write + Seek>(
     Ok(())
 }
 
-fn write_stss<W: Write>(w: &mut W, sync_samples: &[bool]) -> Result<(), String> {
-    let entry_count = sync_samples.iter().filter(|&&x| x).count() as u32;
-    let size = 16 + entry_count * 4;
-    write_full_box_header(w, b"stss", size, 0, 0)?;
-    w.write_u32::<BE>(entry_count).map_err(|e| e.to_string())?;
-    for (i, &is_sync) in sync_samples.iter().enumerate() {
-        if is_sync {
-            w.write_u32::<BE>((i + 1) as u32)
-                .map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-fn write_sdtp<W: Write>(w: &mut W, sync_samples: &[bool]) -> Result<(), String> {
-    let size = 12 + sync_samples.len() as u32;
-    write_full_box_header(w, b"sdtp", size, 0, 0)?;
-    for &is_sync in sync_samples {
-        let depends_on = if is_sync { 2 } else { 1 };
-        let byte = depends_on << 4;
-        w.write_u8(byte).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-fn write_av1c<W: Write>(w: &mut W, c: &Av1SequenceInfo, include_obu: bool) -> Result<(), String> {
-    let payload_len = if include_obu { c.raw_obu.len() } else { 0 };
-    write_box_header(w, b"av1C", (12 + payload_len) as u32)?;
+fn write_av1c<W: Write>(w: &mut W, c: &Av1SequenceInfo) -> Result<(), String> {
+    let payload_len = 4 + c.raw_obu.len();
+    write_box_header(w, b"av1C", (8 + payload_len) as u32)?;
     w.write_u8(0x81).map_err(|e| e.to_string())?;
     w.write_u8((c.seq_profile << 5) | (c.seq_level_idx_0 & 0x1F))
         .map_err(|e| e.to_string())?;
@@ -742,10 +622,7 @@ fn write_av1c<W: Write>(w: &mut W, c: &Av1SequenceInfo, include_obu: bool) -> Re
         | (c.chroma_sample_position & 0x03);
     w.write_u8(b3).map_err(|e| e.to_string())?;
     w.write_u8(0).map_err(|e| e.to_string())?;
-
-    if include_obu {
-        w.write_all(&c.raw_obu).map_err(|e| e.to_string())?;
-    }
+    w.write_all(&c.raw_obu).map_err(|e| e.to_string())?;
     Ok(())
 }
 
