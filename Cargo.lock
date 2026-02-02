@@ -548,9 +548,9 @@ dependencies = [
 
 [[package]]
 name = "git2"
-version = "0.20.3"
+version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e2b37e2f62729cdada11f0e6b3b6fe383c69c29fc619e391223e12856af308c"
+checksum = "7b88256088d75a56f8ecfa070513a775dd9107f6530ef14919dac831af9cfe2b"
 dependencies = [
  "bitflags",
  "libc",
@@ -710,7 +710,7 @@ dependencies = [
 [[package]]
 name = "ivf"
 version = "0.1.4"
-source = "git+https://github.com/thmasq/rav1e?tag=0.8.12#856180211ed808369b1ef3c91ff4083c4762212e"
+source = "git+https://github.com/thmasq/rav1e?tag=0.8.13-3#f177719fd7ebf0565f8cbe57af9ea975e203d2ff"
 dependencies = [
  "bitstream-io",
 ]
@@ -827,9 +827,9 @@ dependencies = [
 
 [[package]]
 name = "nasm-rs"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34f676553b60ccbb76f41f9ae8f2428dac3f259ff8f1c2468a174778d06a1af9"
+checksum = "706bf8a5e8c8ddb99128c3291d31bd21f4bcde17f0f4c20ec678d85c74faa149"
 dependencies = [
  "jobserver",
  "log",
@@ -1054,8 +1054,8 @@ dependencies = [
 
 [[package]]
 name = "rav1e"
-version = "0.8.12"
-source = "git+https://github.com/thmasq/rav1e?tag=0.8.12#856180211ed808369b1ef3c91ff4083c4762212e"
+version = "0.8.13"
+source = "git+https://github.com/thmasq/rav1e?tag=0.8.13-3#f177719fd7ebf0565f8cbe57af9ea975e203d2ff"
 dependencies = [
  "aligned-vec",
  "arbitrary",
