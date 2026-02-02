@@ -52,17 +52,6 @@
         #output { margin-top: 20px; text-align: center; }
         img { max-width: 100%; border: 1px solid #ddd; margin-top: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         .error { color: #d9534f; }
-        .download-btn {
-            display: inline-block;
-            margin-top: 10px;
-            padding: 10px 20px;
-            background-color: #007bff;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-        }
-        .download-btn:hover { background-color: #0056b3; }
     </style>
 </head>
 <body>
@@ -149,14 +138,7 @@
                     const img = document.createElement('img');
                     img.src = url;
                     
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = "converted.avif";
-                    link.innerText = "Download converted.avif";
-                    link.className = "download-btn";
-
                     output.appendChild(img);
-                    output.appendChild(link);
                     status.innerText = "Success!";
                 } else if (msg.status === 'error') {
                     status.innerText = "Error: " + msg.error;
