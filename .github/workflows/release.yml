@@ -37,6 +37,7 @@ jobs:
           cp index.html public/
           cp worker.js public/
           cp -r pkg public/
+          cp media/* public/
 
       - name: Zip pkg for Release
         run: zip -r giftoavif-wasm.zip pkg
