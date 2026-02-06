@@ -72,9 +72,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.100"
+version = "1.0.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
+checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
 
 [[package]]
 name = "arbitrary"
@@ -144,6 +144,27 @@ dependencies = [
 name = "av-scenechange"
 version = "0.22.3"
 source = "git+https://github.com/thmasq/av-scenechange?tag=0.22.3#10531bdefdbd4eb033be0b47996e93b333f6c974"
+dependencies = [
+ "aligned",
+ "anyhow",
+ "arrayvec",
+ "av-decoders",
+ "cfg-if",
+ "cpufeatures",
+ "log",
+ "num-rational",
+ "num-traits",
+ "pastey 0.2.1",
+ "rayon",
+ "thiserror 2.0.18",
+ "v_frame",
+ "y4m",
+]
+
+[[package]]
+name = "av-scenechange"
+version = "0.22.5"
+source = "git+https://github.com/thmasq/av-scenechange?tag=0.22.5#76a529f2ee46840923359251511e1cf6039e6824"
 dependencies = [
  "aligned",
  "anyhow",
@@ -266,9 +287,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "clap"
-version = "4.5.56"
+version = "4.5.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a75ca66430e33a14957acc24c5077b503e7d374151b2b4b3a10c83b4ceb4be0e"
+checksum = "6899ea499e3fb9305a65d5ebf6e3d2248c5fab291f300ad0a704fbe142eae31a"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -276,9 +297,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.56"
+version = "4.5.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "793207c7fa6300a0608d1080b858e5fdbe713cdc1c8db9fb17777d8a13e63df0"
+checksum = "7b12c8b680195a62a8364d16b8447b01b6c2c8f9aaf68bee653be34d4245e238"
 dependencies = [
  "anstream",
  "anstyle",
@@ -531,7 +552,7 @@ dependencies = [
 name = "giftoavif"
 version = "1.0.0"
 dependencies = [
- "av-scenechange",
+ "av-scenechange 0.22.3",
  "bitstream-io",
  "byteorder",
  "console_error_panic_hook",
@@ -710,7 +731,7 @@ dependencies = [
 [[package]]
 name = "ivf"
 version = "0.1.4"
-source = "git+https://github.com/thmasq/rav1e?tag=0.8.13-3#f177719fd7ebf0565f8cbe57af9ea975e203d2ff"
+source = "git+https://github.com/thmasq/rav1e?tag=0.8.16#5b7e4f5bd6ab5833973e66234727e3cb94b05b36"
 dependencies = [
  "bitstream-io",
 ]
@@ -1054,15 +1075,15 @@ dependencies = [
 
 [[package]]
 name = "rav1e"
-version = "0.8.13"
-source = "git+https://github.com/thmasq/rav1e?tag=0.8.13-3#f177719fd7ebf0565f8cbe57af9ea975e203d2ff"
+version = "0.8.16"
+source = "git+https://github.com/thmasq/rav1e?tag=0.8.16#5b7e4f5bd6ab5833973e66234727e3cb94b05b36"
 dependencies = [
  "aligned-vec",
  "arbitrary",
  "arg_enum_proc_macro",
  "arrayvec",
  "av-metrics",
- "av-scenechange",
+ "av-scenechange 0.22.5",
  "av1-grain",
  "bitstream-io",
  "built",
@@ -1655,18 +1676,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.37"
+version = "0.8.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7456cf00f0685ad319c5b1693f291a650eaf345e941d082fc4e03df8a03996ac"
+checksum = "db6d35d663eadb6c932438e763b262fe1a70987f9ae936e60158176d710cae4a"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.37"
+version = "0.8.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1328722bbf2115db7e19d69ebcc15e795719e2d66b60827c6a69a117365e37a0"
+checksum = "4122cd3169e94605190e77839c9a40d40ed048d305bfdc146e7df40ab0f3e517"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -61,6 +61,8 @@ pub fn gif_to_avif(
     playback_speed: Option<f32>,
     interpolate: Option<bool>,
 ) -> Result<Vec<u8>, String> {
+    let start_time = performance_now();
+
     let target_fps = fps.unwrap_or(30);
     let target_crf = crf.unwrap_or(30);
     let target_speed = encoder_speed.unwrap_or(6);
@@ -276,6 +278,15 @@ pub fn gif_to_avif(
         height,
         target_fps,
     )?;
+
+    let end_time = performance_now();
+    let elapsed_ms = end_time - start_time;
+
+    log(&format!(
+        "Encoding completed in {:.2} ms ({:.2} s)",
+        elapsed_ms,
+        elapsed_ms / 1000.0
+    ));
 
     Ok(output)
 }
