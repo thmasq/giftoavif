@@ -149,27 +149,6 @@ dependencies = [
  "anyhow",
  "arrayvec",
  "av-decoders",
- "cfg-if",
- "cpufeatures",
- "log",
- "num-rational",
- "num-traits",
- "pastey 0.2.1",
- "rayon",
- "thiserror 2.0.18",
- "v_frame",
- "y4m",
-]
-
-[[package]]
-name = "av-scenechange"
-version = "0.22.5"
-source = "git+https://github.com/thmasq/av-scenechange?tag=0.22.5#76a529f2ee46840923359251511e1cf6039e6824"
-dependencies = [
- "aligned",
- "anyhow",
- "arrayvec",
- "av-decoders",
  "cc",
  "cfg-if",
  "cpufeatures",
@@ -552,7 +531,7 @@ dependencies = [
 name = "giftoavif"
 version = "1.0.0"
 dependencies = [
- "av-scenechange 0.22.3",
+ "av-scenechange",
  "bitstream-io",
  "byteorder",
  "console_error_panic_hook",
@@ -731,7 +710,7 @@ dependencies = [
 [[package]]
 name = "ivf"
 version = "0.1.4"
-source = "git+https://github.com/thmasq/rav1e?tag=0.8.16#5b7e4f5bd6ab5833973e66234727e3cb94b05b36"
+source = "git+https://github.com/thmasq/rav1e?tag=0.8.17#85ba9ca07dde61479be80413480a99815da0fa4a"
 dependencies = [
  "bitstream-io",
 ]
@@ -1075,15 +1054,15 @@ dependencies = [
 
 [[package]]
 name = "rav1e"
-version = "0.8.16"
-source = "git+https://github.com/thmasq/rav1e?tag=0.8.16#5b7e4f5bd6ab5833973e66234727e3cb94b05b36"
+version = "0.8.17"
+source = "git+https://github.com/thmasq/rav1e?tag=0.8.17#85ba9ca07dde61479be80413480a99815da0fa4a"
 dependencies = [
  "aligned-vec",
  "arbitrary",
  "arg_enum_proc_macro",
  "arrayvec",
  "av-metrics",
- "av-scenechange 0.22.5",
+ "av-scenechange",
  "av1-grain",
  "bitstream-io",
  "built",
